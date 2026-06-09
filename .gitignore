@@ -2,4 +2,4 @@ venv/
 .env
 __pycache__/
 *.pyc
-.DS_Store
+.DS_Storegit remote add origin https://github.com/nehnamehranmk638-dev/TripTailor.git
