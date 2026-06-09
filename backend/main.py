@@ -1,3 +1,5 @@
+from backend.ranker import rank_spots, build_itinerary, smart_replan
+from backend.models import UserCreate, ItineraryRequest, FeedbackRequest, ReplanRequest, SmartReplanRequest
 from fastapi import FastAPI, HTTPException
 from backend.database import SessionLocal
 from backend.models import UserCreate, ItineraryRequest, FeedbackRequest, ReplanRequest
@@ -41,7 +43,7 @@ def generate_itinerary(request: ItineraryRequest):
         category_weights = user.category_weights
 
         spots = db.execute(
-            text("SELECT * FROM spots WHERE city = :city"),
+            text("SELECT * FROM spots WHERE LOWER(city) = LOWER(:city)"),
             {"city": request.city}
         ).fetchall()
 
@@ -93,7 +95,7 @@ def submit_feedback(request: FeedbackRequest):
         if request.direction == "up":
             weights[category] = round(min(weights.get(category, 1.0) + 0.2, 2.0), 2)
         elif request.direction == "down":
-            weights[category] = round(max(weights.get(category, 1.0) - 0.3, 0.1), 2)
+            weights[category] = round(max(weights.get(category, 1.0) - 0.6, 0.0), 2)
 
         db.execute(
             text("UPDATE users SET category_weights = :w WHERE username = :u"),
@@ -120,3 +122,33 @@ def replan(request: ReplanRequest):
             days=request.days
         )
     )
+@app.post("/smart-replan")
+def smart_replan_endpoint(request: SmartReplanRequest):
+    db = SessionLocal()
+    try:
+        user = get_user(db, request.username)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        category_weights = user.category_weights
+
+        spots = db.execute(
+            text("SELECT * FROM spots WHERE LOWER(city) = LOWER(:city)"),
+            {"city": request.city}
+        ).fetchall()
+
+        if not spots:
+            raise HTTPException(status_code=404, detail="No spots found for this city")
+
+        new_itinerary = smart_replan(
+            request.current_itinerary,
+            spots,
+            category_weights,
+            request.budget_per_day,
+            request.locked_spot_ids,
+            request.disliked_spot_ids
+        )
+
+        return {"itinerary": new_itinerary, "city": request.city}
+    finally:
+        db.close()
