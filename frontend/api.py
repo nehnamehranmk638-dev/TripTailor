@@ -3,12 +3,15 @@ from frontend.config import API_BASE_URL
 
 def signup(username, password, country):
     r = requests.post(f"{API_BASE_URL}/signup",
-                     json={"username": username, "password": password, "country": country})
+                     json={"username": username,
+                           "password": password,
+                           "country": country})
     return r.json()
 
 def login(username, password):
     r = requests.post(f"{API_BASE_URL}/login",
-                     json={"username": username, "password": password})
+                     json={"username": username,
+                           "password": password})
     return r.json()
 
 def get_countries():
@@ -58,13 +61,15 @@ def smart_replan(username, city, budget_per_day_usd, days,
     })
     return r.json()
 
-def midtrip_assist(username, message, city, current_itinerary, day=None):
+def midtrip_assist(username, message, city, current_itinerary,
+                  day=None, chat_history=None):
     r = requests.post(f"{API_BASE_URL}/midtrip-assist", json={
         "username": username,
         "message": message,
         "city": city,
         "current_itinerary": current_itinerary,
-        "day": day
+        "day": day,
+        "chat_history": chat_history or []
     })
     return r.json()
 
@@ -95,6 +100,74 @@ def get_dashboard(username):
     r = requests.get(f"{API_BASE_URL}/dashboard/{username}")
     return r.json()
 
-def get_spot_insight(spot_name, city):
-    r = requests.get(f"{API_BASE_URL}/spot-insight/{spot_name}/{city}")
-    return r.json().get("insight", "")
+def delete_trip(trip_id, username):
+    r = requests.delete(
+        f"{API_BASE_URL}/trip/{trip_id}",
+        params={"username": username}
+    )
+    return r.json()
+
+def save_notes(trip_id, username, notes):
+    r = requests.put(
+        f"{API_BASE_URL}/trip/{trip_id}/notes",
+        params={"username": username, "notes": notes}
+    )
+    return r.json()
+
+def get_trip_notes(trip_id):
+    r = requests.get(f"{API_BASE_URL}/trip/{trip_id}/trip-notes")
+    return r.json().get("notes", [])
+
+def add_trip_note(trip_id, title, content):
+    r = requests.post(
+        f"{API_BASE_URL}/trip/{trip_id}/trip-notes",
+        params={"title": title, "content": content}
+    )
+    return r.json()
+
+def delete_trip_note(note_id):
+    r = requests.delete(f"{API_BASE_URL}/trip-note/{note_id}")
+    return r.json()
+
+def get_trip_chat(trip_id):
+    r = requests.get(f"{API_BASE_URL}/trip/{trip_id}/chat")
+    return r.json().get("messages", [])
+
+def save_trip_chat(trip_id, role, content):
+    r = requests.post(
+        f"{API_BASE_URL}/trip/{trip_id}/chat",
+        params={"role": role, "content": content}
+    )
+    return r.json()
+
+def clear_trip_chat(trip_id):
+    r = requests.delete(f"{API_BASE_URL}/trip/{trip_id}/chat")
+    return r.json()
+
+def update_trip_itinerary(trip_id, username, itinerary_data):
+    r = requests.put(
+        f"{API_BASE_URL}/trip/{trip_id}/itinerary",
+        params={"username": username},
+        json=itinerary_data
+    )
+    return r.json()
+
+def get_weather(city, days):
+    try:
+        r = requests.get(
+            f"{API_BASE_URL}/weather/{city}/{days}",
+            timeout=5
+        )
+        return r.json()
+    except:
+        return {"forecast": [], "available": False}
+
+def get_local_tip(spot_id):
+    try:
+        r = requests.get(
+            f"{API_BASE_URL}/local-tip/{spot_id}",
+            timeout=8
+        )
+        return r.json().get("tip", "")
+    except:
+        return ""

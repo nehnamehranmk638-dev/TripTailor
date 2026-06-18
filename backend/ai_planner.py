@@ -66,41 +66,68 @@ def handle_midtrip_request(
     user_message: str,
     current_itinerary: dict,
     city: str,
-    day: int = None
+    day: int = None,
+    chat_history: list = None
 ) -> dict:
     itinerary_summary = []
     for day_num, slots in current_itinerary.items():
-        for time_slot, spot in slots.items():
-            if spot:
-                itinerary_summary.append(
-                    f"Day {day_num} {time_slot}: {spot['name']} ({spot['category']})"
-                )
+        if isinstance(slots, list):
+            for slot in slots:
+                if isinstance(slot, dict):
+                    spot = slot.get("spot", {})
+                    if spot:
+                        itinerary_summary.append(
+                            f"Day {day_num} {slot.get('start_time', '')}: "
+                            f"{spot.get('name', '')} ({spot.get('category', '')})"
+                        )
 
-    prompt = f"""
-You are a helpful travel assistant. The user is currently on a trip to {city}.
+    messages = []
+
+    messages.append({
+        "role": "user",
+        "content": f"""You are a helpful travel assistant for a trip to {city}.
 
 Current itinerary:
 {chr(10).join(itinerary_summary)}
 
-User request: "{user_message}"
+You have memory of the full conversation. Be helpful, friendly and specific."""
+    })
+    messages.append({
+        "role": "assistant",
+        "content": "I'm your trip assistant! I can help you modify plans, suggest alternatives, or answer questions about your itinerary."
+    })
 
-Analyze the request and return ONLY a JSON object:
-{{
-    "action": "replace_spot" or "add_info" or "weather_advice" or "general_advice",
-    "day": day number if specific day mentioned or null,
+    if chat_history:
+        for msg in chat_history[:-1]:
+            messages.append({
+                "role": msg["role"],
+                "content": msg["content"]
+            })
+
+    messages.append({"role": "user", "content": user_message})
+
+    prompt_suffix = """
+
+Based on the conversation and current itinerary, return ONLY a JSON object:
+{
+    "action": "replace_spot" or "add_info" or "general_advice",
+    "day": specific day number as integer if mentioned (e.g. 2 for "Day 2") or null,
     "time_slot": "Morning" or "Afternoon" or "Evening" or null,
     "reason": "brief reason for change",
-    "category_preference": "Culture" or "Food" or "Nature" or "Shopping" or "Art" or null,
-    "response_message": "friendly response to show the user",
+    "category_preference": "Culture" or "Food" or "Nature" or "Shopping" or "Art" or "Nightlife" or null,
+    "response_message": "friendly conversational response. If suggesting a replacement, mention you found alternatives and they can see them in the suggestion panel.",
     "indoor_preferred": true or false
-}}
+}
 
-Return ONLY the JSON.
-"""
+If the user asks to replace, change, swap, remove or modify any spot — set action to "replace_spot".
+Return ONLY the JSON, nothing else."""
+
+    messages[-1]["content"] += prompt_suffix
+
     try:
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": prompt}],
+            messages=messages,
             temperature=0.3
         )
         content = response.choices[0].message.content.strip()
@@ -109,7 +136,7 @@ Return ONLY the JSON.
     except Exception as e:
         return {
             "action": "general_advice",
-            "response_message": "I understand you want to make a change. Could you tell me more specifically which day and activity you'd like to modify?",
+            "response_message": "I understand. Could you tell me more specifically what you'd like to change?",
             "error": str(e)
         }
 

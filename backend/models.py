@@ -43,6 +43,7 @@ class MidTripRequest(BaseModel):
     city: str
     current_itinerary: dict
     day: Optional[int] = None
+    chat_history: Optional[list] = []
 
 class SaveTripRequest(BaseModel):
     username: str

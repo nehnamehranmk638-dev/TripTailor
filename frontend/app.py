@@ -49,25 +49,62 @@ def init_session_state():
         "replan_triggered": False,
         "setup_step": 1,
         "parsed_trip": {},
-        "chat_history": [],
         "view_mode": "timeline",
-        "show_chat": False,
-        "collab_recs": []
+        "collab_recs": [],
+        "current_trip_id": None,
+        "current_trip_notes": "",
+        "is_saved_trip": False
     }
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
 
-def show_navbar():
+def show_new_trip_navbar():
+    col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+    with col1:
+        st.markdown("### ✈️ TripTailor")
+    with col2:
+        if st.button("🏠 Home", use_container_width=True,
+                    key="navbar_home"):
+            st.session_state.page = "dashboard"
+            st.rerun()
+    with col3:
+        st.markdown(
+            f"<div style='padding:8px; text-align:center; font-size:13px'>"
+            f"👤 {st.session_state.username}</div>",
+            unsafe_allow_html=True
+        )
+    with col4:
+        if st.button("🚪 Logout", use_container_width=True,
+                    key="navbar_logout"):
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
+    st.divider()
+
+def show_saved_trip_navbar():
+    col1, col2 = st.columns([6, 1])
+    with col1:
+        st.markdown("### ✈️ TripTailor")
+    with col2:
+        if st.button("🏠 Home", use_container_width=True,
+                    key="saved_navbar_home"):
+            st.session_state.page = "dashboard"
+            st.rerun()
+    st.divider()
+
+def show_dashboard_navbar():
     col1, col2, col3, col4, col5 = st.columns([2, 1, 1, 1, 1])
     with col1:
         st.markdown("### ✈️ TripTailor")
     with col2:
-        if st.button("🏠 Home", use_container_width=True):
+        if st.button("🏠 Home", use_container_width=True,
+                    key="dash_home"):
             st.session_state.page = "dashboard"
             st.rerun()
     with col3:
-        if st.button("✨ New Trip", use_container_width=True):
+        if st.button("✨ New Trip", use_container_width=True,
+                    key="dash_new_trip"):
             st.session_state.page = "trip_setup"
             st.rerun()
     with col4:
@@ -77,7 +114,8 @@ def show_navbar():
             unsafe_allow_html=True
         )
     with col5:
-        if st.button("🚪 Logout", use_container_width=True):
+        if st.button("🚪 Logout", use_container_width=True,
+                    key="dash_logout"):
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
             st.rerun()
@@ -91,17 +129,20 @@ def main():
         show_auth()
         return
 
-    show_navbar()
-
     page = st.session_state.page
 
-    if page == "dashboard":
-        show_dashboard()
-    elif page == "trip_setup":
-        show_trip_setup()
-    elif page == "itinerary":
+    if page == "itinerary":
+        is_saved = st.session_state.get("is_saved_trip", False)
+        if is_saved:
+            show_saved_trip_navbar()
+        else:
+            show_new_trip_navbar()
         show_itinerary()
+    elif page == "trip_setup":
+        show_dashboard_navbar()
+        show_trip_setup()
     else:
+        show_dashboard_navbar()
         show_dashboard()
 
 main()
