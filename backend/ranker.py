@@ -1,6 +1,8 @@
 import math
 from collections import defaultdict
 
+def _round_to_quarter_hour(minutes):
+    return int(round(minutes / 15) * 15)
 
 def _haversine_distance_km(lat1, lon1, lat2, lon2):
     if not all([lat1, lon1, lat2, lon2]):
@@ -45,19 +47,12 @@ def _transport_mode(dist_km):
 
 
 def _format_transport(dist_km, travel_mins):
-    mode = _transport_mode(dist_km)
     display = max(travel_mins - 15, 1)
-    if mode == "walk":
-        return "walk", f"🚶 {display} min walk"
-    elif mode == "auto":
-        return "auto", f"🛺 {display} min auto"
-    else:
-        if display >= 60:
-            h = display // 60
-            m = display % 60
-            return "drive", (f"🚗 {h}h {m}m drive" if m
-                            else f"🚗 {h}h drive")
-        return "drive", f"🚗 {display} min drive"
+    if display >= 60:
+        h = display // 60
+        m = display % 60
+        return None, (f"{h}h {m}m" if m else f"{h}h")
+    return None, f"{display} min"
 
 
 def calculate_score(spot, category_weights, budget_per_day):
@@ -109,12 +104,18 @@ def _reorder_by_proximity(spots):
     return ordered
 
 
+def _preferred_time_window(spot):
+    tod = (getattr(spot, 'time_of_day', None) or '').strip().lower()
+    if tod == 'morning':
+        return (9 * 60, 13 * 60)
+    if tod == 'afternoon':
+        return (12 * 60, 18 * 60)
+    if tod == 'evening':
+        return (17 * 60, 23 * 60)
+    return (9 * 60, 20 * 60)
+
+
 def _distribute_spots_across_days(ranked_spots, days, max_hours_per_day=9):
-    """
-    Distributes spots round-robin across days, respecting category
-    balance per day AND guaranteeing every day gets spots if enough
-    total spots exist.
-    """
     day_buckets = {d: [] for d in range(1, days + 1)}
     day_hours = {d: 0.0 for d in range(1, days + 1)}
     day_categories = {d: defaultdict(int) for d in range(1, days + 1)}
@@ -164,19 +165,36 @@ def build_timed_itinerary(ranked_spots, days):
 
     for day in range(1, days + 1):
         day_pool = day_buckets.get(day, [])
-
         if not day_pool:
             itinerary[day] = []
             continue
 
-        if len(day_pool) > 1:
-            day_pool = _reorder_by_proximity(day_pool)
+        morning = [s for s in day_pool
+                  if (getattr(s, 'time_of_day', '') or '').lower() == 'morning']
+        afternoon = [s for s in day_pool
+                    if (getattr(s, 'time_of_day', '') or '').lower() == 'afternoon']
+        evening = [s for s in day_pool
+                  if (getattr(s, 'time_of_day', '') or '').lower() == 'evening']
+        flexible = [s for s in day_pool
+                   if (getattr(s, 'time_of_day', '') or '').lower()
+                   not in ('morning', 'afternoon', 'evening')]
+
+        if len(morning) > 1:
+            morning = _reorder_by_proximity(morning)
+        if len(afternoon) > 1:
+            afternoon = _reorder_by_proximity(afternoon)
+        if len(evening) > 1:
+            evening = _reorder_by_proximity(evening)
+        if len(flexible) > 1:
+            flexible = _reorder_by_proximity(flexible)
+
+        ordered_pool = morning + flexible + afternoon + evening
 
         current_time = DAY_START
         prev_spot = None
         day_slots = []
 
-        for spot in day_pool:
+        for spot in ordered_pool:
             dur = float(spot.duration_hours or 2.0)
             duration_mins = int(dur * 60)
 
@@ -197,7 +215,15 @@ def build_timed_itinerary(ranked_spots, days):
                 mode = None
                 transport_label = None
 
-            arrival_time = current_time + travel_mins
+            arrival_time = _round_to_quarter_hour(current_time + travel_mins)
+
+            win_start, win_end = _preferred_time_window(spot)
+            if arrival_time < win_start:
+                arrival_time = _round_to_quarter_hour(win_start)
+            elif arrival_time > win_end - 30:
+                arrival_time = _round_to_quarter_hour(
+                    max(arrival_time, win_start)
+                )
 
             if arrival_time >= DAY_END - 45:
                 break
@@ -302,7 +328,7 @@ def smart_replan(current_itinerary, all_spots, category_weights,
                 mode = None
                 transport_label = None
 
-            arrival = current_time + travel_mins
+            arrival = _round_to_quarter_hour(current_time + travel_mins)
 
             if spot_id in locked_ids or spot_id not in disliked_ids:
                 new_day.append({
@@ -336,7 +362,7 @@ def smart_replan(current_itinerary, all_spots, category_weights,
                     )
                     r_travel = _travel_time_minutes(r_dist)
                     r_mode, r_label = _format_transport(r_dist, r_travel)
-                    r_arrival = current_time + r_travel
+                    r_arrival = _round_to_quarter_hour(current_time + r_travel)
                     r_spot_dict = _spot_to_dict(replacement)
 
                     new_day.append({

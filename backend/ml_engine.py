@@ -15,7 +15,7 @@ def update_category_weights(username: str, category: str, direction: str):
         if direction == "up":
             weights[category] = round(min(weights.get(category, 1.0) + 0.2, 2.0), 2)
         elif direction == "down":
-            weights[category] = round(max(weights.get(category, 1.0) - 0.6, 0.0), 2)
+            weights[category] = round(max(weights.get(category, 1.0) - 0.6, 0.3), 2)
         db.execute(
             text("UPDATE users SET category_weights = :w WHERE username = :u"),
             {"w": json.dumps(weights), "u": username}

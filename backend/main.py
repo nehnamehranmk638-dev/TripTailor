@@ -218,6 +218,8 @@ def generate_itinerary(request: ItineraryRequest):
                     "end_time": slot["end_time"],
                     "duration_hours": slot["duration_hours"],
                     "time_label": slot["time_label"],
+                    "transport_mode": slot.get("transport_mode"),
+                    "transport_label": slot.get("transport_label"),
                     "spot": {
                         "id": spot.id,
                         "name": spot.name,

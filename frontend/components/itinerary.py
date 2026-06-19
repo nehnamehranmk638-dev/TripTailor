@@ -775,18 +775,11 @@ def show_timed_timeline(itinerary):
                             unsafe_allow_html=True
                         )
                     with t3:
-                        if transport_mode == "walk":
-                            color, bg = "#2E7D32", "#E8F5E9"
-                        elif transport_mode == "auto":
-                            color, bg = "#E65100", "#FFF3E0"
-                        else:
-                            color, bg = "#1565C0", "#E3F2FD"
                         st.markdown(
-                            f"<div style='background:{bg}; "
-                            f"color:{color}; font-size:11px; "
-                            f"padding:3px 12px; border-radius:12px; "
+                            f"<div style='background:#F0F0F0; color:#666; "
+                            f"font-size:11px; padding:3px 12px; border-radius:12px; "
                             f"display:inline-block; margin:3px 0 5px'>"
-                            f"{transport_label}</div>",
+                            f"🕒 {transport_label}</div>",
                             unsafe_allow_html=True
                         )
 
