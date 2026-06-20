@@ -110,16 +110,18 @@ You have memory of the full conversation. Be helpful, friendly and specific."""
 
 Based on the conversation and current itinerary, return ONLY a JSON object:
 {
-    "action": "replace_spot" or "add_info" or "general_advice",
+    "action": "replace_spot" or "restaurant_suggestion" or "add_info" or "general_advice",
     "day": specific day number as integer if mentioned (e.g. 2 for "Day 2") or null,
     "time_slot": "Morning" or "Afternoon" or "Evening" or null,
     "reason": "brief reason for change",
     "category_preference": "Culture" or "Food" or "Nature" or "Shopping" or "Art" or "Nightlife" or null,
-    "response_message": "friendly conversational response. If suggesting a replacement, mention you found alternatives and they can see them in the suggestion panel.",
+    "budget_preference": "budget" or "mid-range" or "luxury" or null,
+    "response_message": "a short friendly response confirming what you understood the user wants, WITHOUT listing actual restaurant names yet — the backend will append real options if found",
     "indoor_preferred": true or false
 }
 
-If the user asks to replace, change, swap, remove or modify any spot — set action to "replace_spot".
+If the user asks for restaurant, food, or dining recommendations — set action to "restaurant_suggestion" and set budget_preference based on words like "budget", "cheap", "affordable" (= budget), "fancy", "luxury", "expensive" (= luxury), otherwise null.
+If the user asks to replace, change, swap, remove or modify any spot, or expresses they don't want to spend time at a specific place — set action to "replace_spot" and identify which day/time_slot it refers to based on the itinerary above.
 Return ONLY the JSON, nothing else."""
 
     messages[-1]["content"] += prompt_suffix

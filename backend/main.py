@@ -508,6 +508,8 @@ def midtrip_assist(request: MidTripRequest):
         )
 
         suggestions = []
+        restaurant_suggestions = []
+
         if ai_response.get("action") == "replace_spot":
             category_weights = dict(user.category_weights)
             spots = db.execute(
@@ -541,7 +543,6 @@ def midtrip_assist(request: MidTripRequest):
                 s for s in ranked if s.id not in current_ids
             ][:3]
 
-            suggestions = []
             for s in suggestion_spots:
                 cost_local = convert_to_local(float(s.cost_usd), usd_rate)
                 suggestions.append({
@@ -559,9 +560,37 @@ def midtrip_assist(request: MidTripRequest):
                     "longitude": float(s.longitude) if s.longitude else None
                 })
 
+        elif ai_response.get("action") == "restaurant_suggestion":
+            budget_pref = ai_response.get("budget_preference")
+
+            query = "SELECT * FROM restaurants WHERE LOWER(city) = LOWER(:city)"
+            params = {"city": request.city}
+
+            if budget_pref == "budget":
+                query += " AND price_per_meal_usd <= 8"
+            elif budget_pref == "luxury":
+                query += " AND price_per_meal_usd >= 25"
+
+            query += " ORDER BY rating DESC LIMIT 5"
+
+            restaurants = db.execute(text(query), params).fetchall()
+
+            for r in restaurants:
+                cost_local = convert_to_local(float(r.price_per_meal_usd), usd_rate)
+                restaurant_suggestions.append({
+                    "name": r.name,
+                    "cuisine": r.cuisine,
+                    "cost_usd": float(r.price_per_meal_usd),
+                    "cost_local": cost_local,
+                    "currency_symbol": currency_symbol,
+                    "rating": float(r.rating),
+                    "description": r.description
+                })
+
         return {
             "ai_response": ai_response,
             "suggestions": suggestions,
+            "restaurant_suggestions": restaurant_suggestions,
             "target_day": ai_response.get("day"),
             "target_time_slot": ai_response.get("time_slot")
         }

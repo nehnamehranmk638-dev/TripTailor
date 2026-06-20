@@ -217,6 +217,7 @@ def show_sidebar_chat():
                     "I understand. Let me help you with that."
                 )
                 suggestions = result.get("suggestions", [])
+                restaurant_suggestions = result.get("restaurant_suggestions", [])
 
                 if suggestions:
                     response_text += (
@@ -231,6 +232,14 @@ def show_sidebar_chat():
                         "spot": suggestions[0],
                         "all_suggestions": suggestions
                     }
+                elif restaurant_suggestions:
+                    response_text += "\n\n"
+                    for r in restaurant_suggestions:
+                        response_text += (
+                            f"\n🍽️ **{r['name']}** ({r.get('cuisine', '')}) — "
+                            f"{r['currency_symbol']}{r['cost_local']:.0f} | "
+                            f"⭐ {r['rating']}\n_{r.get('description', '')}_\n"
+                        )
 
                 chat_history.append(
                     {"role": "assistant", "content": response_text}

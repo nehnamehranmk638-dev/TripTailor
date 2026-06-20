@@ -121,33 +121,69 @@ def _distribute_spots_across_days(ranked_spots, days, max_hours_per_day=9):
     day_categories = {d: defaultdict(int) for d in range(1, days + 1)}
     MAX_PER_CATEGORY_PER_DAY = 2
 
-    for spot in ranked_spots:
+    remaining = list(ranked_spots)
+
+    for d in range(1, days + 1):
+        if not remaining:
+            break
+
+        seed = remaining.pop(0)
+        dur = float(seed.duration_hours or 2.0)
+        day_buckets[d].append(seed)
+        day_hours[d] += dur
+        day_categories[d][seed.category] += 1
+
+        while remaining:
+            anchor = day_buckets[d][-1]
+            anchor_lat = getattr(anchor, 'latitude', None)
+            anchor_lon = getattr(anchor, 'longitude', None)
+
+            best_idx = None
+            best_dist = float('inf')
+
+            for i, candidate in enumerate(remaining):
+                dur_c = float(candidate.duration_hours or 2.0)
+                if day_hours[d] + dur_c > max_hours_per_day:
+                    continue
+                if day_categories[d][candidate.category] >= MAX_PER_CATEGORY_PER_DAY:
+                    continue
+
+                dist = _haversine_distance_km(
+                    anchor_lat, anchor_lon,
+                    getattr(candidate, 'latitude', None),
+                    getattr(candidate, 'longitude', None)
+                )
+                if dist is None:
+                    dist = 999
+
+                if dist < best_dist:
+                    best_dist = dist
+                    best_idx = i
+
+            if best_idx is None:
+                break
+
+            chosen = remaining.pop(best_idx)
+            dur_c = float(chosen.duration_hours or 2.0)
+            day_buckets[d].append(chosen)
+            day_hours[d] += dur_c
+            day_categories[d][chosen.category] += 1
+
+    leftover_day = 1
+    for spot in remaining:
         dur = float(spot.duration_hours or 2.0)
-        cat = spot.category
-
-        best_day = None
-        best_hours = float('inf')
-
-        for d in range(1, days + 1):
-            if day_hours[d] + dur > max_hours_per_day:
-                continue
-            if day_categories[d][cat] >= MAX_PER_CATEGORY_PER_DAY:
-                continue
-            if day_hours[d] < best_hours:
-                best_hours = day_hours[d]
-                best_day = d
-
-        if best_day is None:
-            for d in range(1, days + 1):
-                if day_hours[d] + dur <= max_hours_per_day:
-                    if day_hours[d] < best_hours:
-                        best_hours = day_hours[d]
-                        best_day = d
-
-        if best_day is not None:
-            day_buckets[best_day].append(spot)
-            day_hours[best_day] += dur
-            day_categories[best_day][cat] += 1
+        placed = False
+        for _ in range(days):
+            d = leftover_day
+            leftover_day = (leftover_day % days) + 1
+            if day_hours[d] + dur <= max_hours_per_day:
+                day_buckets[d].append(spot)
+                day_hours[d] += dur
+                day_categories[d][spot.category] += 1
+                placed = True
+                break
+        if not placed:
+            continue
 
     return day_buckets
 

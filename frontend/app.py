@@ -9,6 +9,7 @@ from frontend.components.dashboard import show_dashboard
 from frontend.components.trip_setup import show_trip_setup
 from frontend.components.itinerary import show_itinerary
 
+
 st.set_page_config(
     page_title="TripTailor — AI Travel Planner",
     page_icon="✈️",
@@ -27,6 +28,7 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
+
 
 def init_session_state():
     defaults = {
@@ -59,6 +61,7 @@ def init_session_state():
         if key not in st.session_state:
             st.session_state[key] = value
 
+
 def show_new_trip_navbar():
     col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
     with col1:
@@ -82,6 +85,7 @@ def show_new_trip_navbar():
             st.rerun()
     st.divider()
 
+
 def show_saved_trip_navbar():
     col1, col2 = st.columns([6, 1])
     with col1:
@@ -92,6 +96,7 @@ def show_saved_trip_navbar():
             st.session_state.page = "dashboard"
             st.rerun()
     st.divider()
+
 
 def show_dashboard_navbar():
     col1, col2, col3, col4, col5 = st.columns([2, 1, 1, 1, 1])
@@ -121,6 +126,7 @@ def show_dashboard_navbar():
             st.rerun()
     st.divider()
 
+
 def main():
     init_session_state()
 
@@ -144,5 +150,6 @@ def main():
     else:
         show_dashboard_navbar()
         show_dashboard()
+
 
 main()
