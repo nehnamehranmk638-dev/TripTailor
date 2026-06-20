@@ -509,8 +509,70 @@ def midtrip_assist(request: MidTripRequest):
 
         suggestions = []
         restaurant_suggestions = []
+        added_spot = None
 
-        if ai_response.get("action") == "replace_spot":
+        if ai_response.get("action") == "add_spot":
+            target_day = str(ai_response.get("day")) if ai_response.get("day") else None
+
+            if not target_day:
+                ai_response["response_message"] = (
+                    "Which day would you like me to add this to?"
+                )
+            else:
+                category_weights = dict(user.category_weights)
+                spots = db.execute(
+                    text("SELECT * FROM spots WHERE LOWER(city) = LOWER(:city)"),
+                    {"city": request.city}
+                ).fetchall()
+
+                category_pref = ai_response.get("category_preference")
+                filtered_spots = spots
+                if category_pref:
+                    cat_filtered = [
+                        s for s in spots if s.category == category_pref
+                    ]
+                    if cat_filtered:
+                        filtered_spots = cat_filtered
+
+                ranked = rank_spots(filtered_spots, category_weights, 99999)
+
+                current_ids = set()
+                for day_slots in request.current_itinerary.values():
+                    if isinstance(day_slots, list):
+                        for slot in day_slots:
+                            if isinstance(slot, dict):
+                                spot = slot.get("spot", {})
+                                if spot:
+                                    current_ids.add(spot.get("id"))
+
+                pick = next((s for s in ranked if s.id not in current_ids), None)
+
+                if pick:
+                    cost_local = convert_to_local(float(pick.cost_usd), usd_rate)
+                    added_spot = {
+                        "id": pick.id,
+                        "name": pick.name,
+                        "category": pick.category,
+                        "cost_usd": float(pick.cost_usd),
+                        "cost_local": cost_local,
+                        "currency_symbol": currency_symbol,
+                        "rating": float(pick.rating),
+                        "description": pick.description,
+                        "duration_hours": float(pick.duration_hours or 2.0),
+                        "time_of_day": pick.time_of_day,
+                        "latitude": float(pick.latitude) if pick.latitude else None,
+                        "longitude": float(pick.longitude) if pick.longitude else None,
+                        "day": target_day
+                    }
+                    ai_response["response_message"] = (
+                        f"Added {pick.name} ({pick.category}) to Day {target_day} ✅"
+                    )
+                else:
+                    ai_response["response_message"] = (
+                        f"I couldn't find a new spot for Day {target_day} in that category — try a different category?"
+                    )
+
+        elif ai_response.get("action") == "replace_spot":
             category_weights = dict(user.category_weights)
             spots = db.execute(
                 text("SELECT * FROM spots WHERE LOWER(city) = LOWER(:city)"),
@@ -591,6 +653,7 @@ def midtrip_assist(request: MidTripRequest):
             "ai_response": ai_response,
             "suggestions": suggestions,
             "restaurant_suggestions": restaurant_suggestions,
+            "added_spot": added_spot,
             "target_day": ai_response.get("day"),
             "target_time_slot": ai_response.get("time_slot")
         }

@@ -241,6 +241,47 @@ def show_sidebar_chat():
                             f"⭐ {r['rating']}\n_{r.get('description', '')}_\n"
                         )
 
+                elif result.get("added_spot"):
+                    added = result["added_spot"]
+                    target_day = added.get("day")
+
+                    itinerary_keys = {str(k): k for k in st.session_state.itinerary.keys()}
+                    actual_key = itinerary_keys.get(str(target_day))
+
+                    if actual_key is not None:
+                        slots = st.session_state.itinerary[actual_key]
+                        if isinstance(slots, list):
+                            last = slots[-1] if slots else {}
+                            last_end = last.get("end_time", "9:00 AM")
+                            dur = added.get("duration_hours", 2.0)
+                            dur_mins = int(dur * 60)
+
+                            new_slot = {
+                                "start_time": _add_minutes_to_time(last_end, 30),
+                                "end_time": _add_minutes_to_time(last_end, 30 + dur_mins),
+                                "duration_hours": dur,
+                                "time_label": _get_label_from_time(
+                                    _add_minutes_to_time(last_end, 30)
+                                ),
+                                "travel_mins": 30,
+                                "transport_mode": None,
+                                "transport_label": None,
+                                "spot": added
+                            }
+                            slots.append(new_slot)
+                            st.session_state.itinerary[actual_key] = slots
+
+                            if trip_id:
+                                update_trip_itinerary(
+                                    trip_id,
+                                    st.session_state.username,
+                                    st.session_state.itinerary
+                                )
+                    else:
+                        response_text += (
+                            f"\n\n⚠️ Couldn't find Day {target_day} in your itinerary."
+                        )
+
                 chat_history.append(
                     {"role": "assistant", "content": response_text}
                 )

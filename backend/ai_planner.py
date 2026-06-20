@@ -110,18 +110,22 @@ You have memory of the full conversation. Be helpful, friendly and specific."""
 
 Based on the conversation and current itinerary, return ONLY a JSON object:
 {
-    "action": "replace_spot" or "restaurant_suggestion" or "add_info" or "general_advice",
+    "action": "add_spot" or "replace_spot" or "restaurant_suggestion" or "general_advice",
     "day": specific day number as integer if mentioned (e.g. 2 for "Day 2") or null,
     "time_slot": "Morning" or "Afternoon" or "Evening" or null,
     "reason": "brief reason for change",
     "category_preference": "Culture" or "Food" or "Nature" or "Shopping" or "Art" or "Nightlife" or null,
     "budget_preference": "budget" or "mid-range" or "luxury" or null,
-    "response_message": "a short friendly response confirming what you understood the user wants, WITHOUT listing actual restaurant names yet — the backend will append real options if found",
+    "response_message": "a short friendly response. If action is add_spot or replace_spot, say you're finding an option now, WITHOUT naming a specific place yet — the backend will pick and confirm the real one.",
     "indoor_preferred": true or false
 }
 
-If the user asks for restaurant, food, or dining recommendations — set action to "restaurant_suggestion" and set budget_preference based on words like "budget", "cheap", "affordable" (= budget), "fancy", "luxury", "expensive" (= luxury), otherwise null.
-If the user asks to replace, change, swap, remove or modify any spot, or expresses they don't want to spend time at a specific place — set action to "replace_spot" and identify which day/time_slot it refers to based on the itinerary above.
+Rules:
+- If the user asks to ADD a new spot/activity/place to a specific day — set action to "add_spot". Extract day number from their message. If category is mentioned (culture, food, nature, shopping, art, nightlife) set category_preference, otherwise null.
+- If the user asks to replace, change, swap, remove an EXISTING spot already in the itinerary — set action to "replace_spot".
+- If the user asks for restaurant/food/dining recommendations — set action to "restaurant_suggestion".
+- Otherwise — set action to "general_advice".
+- NEVER ask a clarifying question if a category was already mentioned anywhere in the conversation history — use the most recent category mentioned and proceed with add_spot or replace_spot immediately. Do not loop asking for confirmation.
 Return ONLY the JSON, nothing else."""
 
     messages[-1]["content"] += prompt_suffix

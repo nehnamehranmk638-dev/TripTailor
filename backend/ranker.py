@@ -1,4 +1,5 @@
 import math
+import requests
 from collections import defaultdict
 
 def _round_to_quarter_hour(minutes):
@@ -15,11 +16,41 @@ def _haversine_distance_km(lat1, lon1, lat2, lon2):
          math.cos(phi1)*math.cos(phi2)*math.sin(dlambda/2)**2)
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
 
+def _get_road_distance_and_time(lat1, lon1, lat2, lon2):
+    if lat1 is None or lon1 is None or lat2 is None or lon2 is None:
+        return None, None
 
-def _travel_time_minutes(dist_km):
-    if dist_km is None:
-        return 30
+    try:
+        url = (
+            f"http://router.project-osrm.org/route/v1/driving/"
+            f"{lon1},{lat1};{lon2},{lat2}?overview=false"
+        )
+        response = requests.get(url, timeout=3)
+        data = response.json()
+
+        if data.get("code") == "Ok" and data.get("routes"):
+            route = data["routes"][0]
+            distance_km = route["distance"] / 1000
+            duration_min = route["duration"] / 60
+            return round(distance_km, 2), round(duration_min, 1)
+    except Exception:
+        pass
+
+    return None, None
+
+def _travel_time_minutes(dist_km, lat1=None, lon1=None, lat2=None, lon2=None):
     BUFFER = 15
+
+    if lat1 is not None and lon1 is not None and lat2 is not None and lon2 is not None:
+        road_dist, road_duration = _get_road_distance_and_time(
+            lat1, lon1, lat2, lon2
+        )
+        if road_duration is not None:
+            return int(road_duration) + BUFFER
+
+    if dist_km is None:
+        return 30 + BUFFER
+
     if dist_km <= 0.3:
         raw = max(5, int(dist_km * 1000 / 80))
     elif dist_km <= 1.0:
@@ -205,26 +236,7 @@ def build_timed_itinerary(ranked_spots, days):
             itinerary[day] = []
             continue
 
-        morning = [s for s in day_pool
-                  if (getattr(s, 'time_of_day', '') or '').lower() == 'morning']
-        afternoon = [s for s in day_pool
-                    if (getattr(s, 'time_of_day', '') or '').lower() == 'afternoon']
-        evening = [s for s in day_pool
-                  if (getattr(s, 'time_of_day', '') or '').lower() == 'evening']
-        flexible = [s for s in day_pool
-                   if (getattr(s, 'time_of_day', '') or '').lower()
-                   not in ('morning', 'afternoon', 'evening')]
-
-        if len(morning) > 1:
-            morning = _reorder_by_proximity(morning)
-        if len(afternoon) > 1:
-            afternoon = _reorder_by_proximity(afternoon)
-        if len(evening) > 1:
-            evening = _reorder_by_proximity(evening)
-        if len(flexible) > 1:
-            flexible = _reorder_by_proximity(flexible)
-
-        ordered_pool = morning + flexible + afternoon + evening
+        ordered_pool = _reorder_by_proximity(day_pool) if len(day_pool) > 1 else day_pool
 
         current_time = DAY_START
         prev_spot = None
@@ -235,16 +247,21 @@ def build_timed_itinerary(ranked_spots, days):
             duration_mins = int(dur * 60)
 
             if prev_spot is not None:
+                prev_lat = getattr(prev_spot, 'latitude', None)
+                prev_lon = getattr(prev_spot, 'longitude', None)
+                spot_lat = getattr(spot, 'latitude', None)
+                spot_lon = getattr(spot, 'longitude', None)
+
                 dist_km = _haversine_distance_km(
-                    getattr(prev_spot, 'latitude', None),
-                    getattr(prev_spot, 'longitude', None),
-                    getattr(spot, 'latitude', None),
-                    getattr(spot, 'longitude', None)
+                    prev_lat, prev_lon, spot_lat, spot_lon
                 )
-                travel_mins = _travel_time_minutes(dist_km)
+                travel_mins = _travel_time_minutes(
+                    dist_km, prev_lat, prev_lon, spot_lat, spot_lon
+                )
                 mode, transport_label = _format_transport(
                     dist_km, travel_mins
                 )
+                
             else:
                 dist_km = None
                 travel_mins = 0
