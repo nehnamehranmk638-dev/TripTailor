@@ -3,91 +3,16 @@ from datetime import datetime
 from frontend.api import (submit_feedback, smart_replan, midtrip_assist,
                           save_trip, get_trip_chat, save_trip_chat,
                           clear_trip_chat, get_trip_notes, add_trip_note,
-                          delete_trip_note, update_trip_itinerary,
-                          get_local_tip)
+                          delete_trip_note, update_trip_itinerary)
 from frontend.config import CATEGORY_ICONS
 from frontend.map_view import show_map
+from backend.ranker import insert_spot_into_day
 
 
-def _check_opening_hours(spot, start_time_str):
-    try:
-        opening = spot.get("opening_time", "09:00") or "09:00"
-        closing = spot.get("closing_time", "18:00") or "18:00"
-        closed_day = spot.get("closed_day", "") or ""
-
-        open_h, open_m = map(int, opening.split(":"))
-        close_h, close_m = map(int, closing.split(":"))
-        open_mins = open_h * 60 + open_m
-        close_mins = close_h * 60 + close_m
-
-        is_pm = "PM" in start_time_str
-        parts = start_time_str.replace(" AM", "").replace(
-            " PM", ""
-        ).split(":")
-        start_h = int(parts[0])
-        start_m = int(parts[1])
-        if is_pm and start_h != 12:
-            start_h += 12
-        if not is_pm and start_h == 12:
-            start_h = 0
-        start_mins = start_h * 60 + start_m
-
-        warnings = []
-
-        today = datetime.now().strftime("%A")
-        if closed_day and today.lower() == closed_day.lower():
-            warnings.append(
-                f"⚠️ Closed on {closed_day}s — verify before visiting"
-            )
-
-        if start_mins < open_mins:
-            warnings.append(
-                f"⚠️ Opens at {opening} — you may arrive too early"
-            )
-        elif start_mins >= close_mins - 30:
-            warnings.append(
-                f"⚠️ Closes at {closing} — limited time remaining"
-            )
-
-        afternoon_break = spot.get("afternoon_break", False)
-        if afternoon_break and 12 * 60 <= start_mins <= 16 * 60:
-            warnings.append(
-                "⚠️ Closed 12pm-4pm for afternoon break"
-            )
-
-        return warnings
-    except:
-        return []
-
-
-def _get_nearby_restaurant(restaurants, spot_lat, spot_lon,
-                           meal_type="lunch"):
-    if not restaurants:
-        return None
-    if isinstance(restaurants, dict):
-        restaurants = restaurants.get("restaurants", [])
-    if not restaurants:
-        return None
-
-    def dist(r):
-        if not (r.get("latitude") and spot_lat):
-            return 999
-        try:
-            import math
-            lat1, lon1 = float(spot_lat), float(spot_lon)
-            lat2, lon2 = float(r["latitude"]), float(r["longitude"])
-            dlat = math.radians(lat2 - lat1)
-            dlon = math.radians(lon2 - lon1)
-            a = (math.sin(dlat/2)**2 +
-                 math.cos(math.radians(lat1)) *
-                 math.cos(math.radians(lat2)) *
-                 math.sin(dlon/2)**2)
-            return 6371 * 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
-        except:
-            return 999
-
-    sorted_rests = sorted(restaurants, key=dist)
-    return sorted_rests[0] if sorted_rests else None
+def _usd_to_local(amount_usd, currency_symbol):
+    rates = {"₹": 83.5, "$": 1.0, "€": 0.92, "£": 0.79}
+    rate = rates.get(currency_symbol, 83.5)
+    return round(amount_usd * rate, 2)
 
 
 def show_sidebar_chat():
@@ -251,25 +176,17 @@ def show_sidebar_chat():
                     if actual_key is not None:
                         slots = st.session_state.itinerary[actual_key]
                         if isinstance(slots, list):
-                            last = slots[-1] if slots else {}
-                            last_end = last.get("end_time", "9:00 AM")
-                            dur = added.get("duration_hours", 2.0)
-                            dur_mins = int(dur * 60)
-
-                            new_slot = {
-                                "start_time": _add_minutes_to_time(last_end, 30),
-                                "end_time": _add_minutes_to_time(last_end, 30 + dur_mins),
-                                "duration_hours": dur,
-                                "time_label": _get_label_from_time(
-                                    _add_minutes_to_time(last_end, 30)
+                            currency_symbol = st.session_state.get("currency_symbol", "₹")
+                            added_full = {
+                                **added,
+                                "cost_local": _usd_to_local(
+                                    added.get("cost_usd", 0), currency_symbol
                                 ),
-                                "travel_mins": 30,
-                                "transport_mode": None,
-                                "transport_label": None,
-                                "spot": added
+                                "currency_symbol": currency_symbol
                             }
-                            slots.append(new_slot)
-                            st.session_state.itinerary[actual_key] = slots
+
+                            new_slots = insert_spot_into_day(slots, added_full)
+                            st.session_state.itinerary[actual_key] = new_slots
 
                             if trip_id:
                                 update_trip_itinerary(
@@ -282,6 +199,29 @@ def show_sidebar_chat():
                             f"\n\n⚠️ Couldn't find Day {target_day} in your itinerary."
                         )
 
+                elif result.get("removed_spot_name"):
+                    removed_name = result["removed_spot_name"]
+                    target_day = result.get("target_day")
+
+                    itinerary_keys = {str(k): k for k in st.session_state.itinerary.keys()}
+                    actual_key = itinerary_keys.get(str(target_day))
+
+                    if actual_key is not None:
+                        slots = st.session_state.itinerary[actual_key]
+                        if isinstance(slots, list):
+                            new_slots = [
+                                s for s in slots
+                                if s.get("spot", {}).get("name") != removed_name
+                            ]
+                            st.session_state.itinerary[actual_key] = new_slots
+
+                            if trip_id:
+                                update_trip_itinerary(
+                                    trip_id,
+                                    st.session_state.username,
+                                    st.session_state.itinerary
+                                )
+
                 chat_history.append(
                     {"role": "assistant", "content": response_text}
                 )
@@ -291,6 +231,8 @@ def show_sidebar_chat():
                 st.session_state[chat_key] = chat_history
                 st.session_state[input_key] += 1
                 st.rerun()
+
+                
 
         if chat_history:
             if st.button(
@@ -313,7 +255,7 @@ def apply_ai_suggestion(pending):
 
     itinerary = st.session_state.itinerary
     currency_symbol = st.session_state.get("currency_symbol", "₹")
-    cost_local = round(new_spot.get("cost_usd", 0) * 83.5, 2)
+    cost_local = _usd_to_local(new_spot.get("cost_usd", 0), currency_symbol)
     new_spot_full = {**new_spot, "cost_local": cost_local,
                     "currency_symbol": currency_symbol}
 
@@ -327,61 +269,25 @@ def apply_ai_suggestion(pending):
                 if d == "down"
             ]
             replaced = False
-            for i, slot in enumerate(slots):
-                if slot.get("spot", {}).get("id") in disliked_ids:
-                    slots[i] = {
-                        **slot,
-                        "duration_hours": new_spot.get(
-                            "duration_hours", 2.0
-                        ),
-                        "spot": new_spot_full
-                    }
+            remaining_slots = []
+            for slot in slots:
+                if (not replaced and
+                        slot.get("spot", {}).get("id") in disliked_ids):
                     replaced = True
-                    break
-            if not replaced:
-                last = slots[-1] if slots else {}
-                last_end = last.get("end_time", "8:00 PM")
-                dur = new_spot.get("duration_hours", 2.0)
-                dur_mins = int(dur * 60)
-                slots.append({
-                    "start_time": _add_minutes_to_time(last_end, 30),
-                    "end_time": _add_minutes_to_time(
-                        last_end, 30 + dur_mins
-                    ),
-                    "duration_hours": dur,
-                    "time_label": _get_label_from_time(
-                        _add_minutes_to_time(last_end, 30)
-                    ),
-                    "travel_mins": 30,
-                    "transport_mode": None,
-                    "transport_label": None,
-                    "spot": new_spot_full
-                })
-            itinerary[target_day] = slots
+                    continue
+                remaining_slots.append(slot)
+
+            if replaced:
+                new_slots = insert_spot_into_day(remaining_slots, new_spot_full)
+            else:
+                new_slots = insert_spot_into_day(slots, new_spot_full)
+
+            itinerary[target_day] = new_slots
     else:
         for day_key in sorted(itinerary.keys(), key=lambda x: int(x)):
             slots = itinerary[day_key]
             if isinstance(slots, list):
-                dur = new_spot.get("duration_hours", 2.0)
-                dur_mins = int(dur * 60)
-                last_end = slots[-1].get(
-                    "end_time", "9:00 AM"
-                ) if slots else "9:00 AM"
-                slots.append({
-                    "start_time": _add_minutes_to_time(last_end, 30),
-                    "end_time": _add_minutes_to_time(
-                        last_end, 30 + dur_mins
-                    ),
-                    "duration_hours": dur,
-                    "time_label": _get_label_from_time(
-                        _add_minutes_to_time(last_end, 30)
-                    ),
-                    "travel_mins": 30,
-                    "transport_mode": None,
-                    "transport_label": None,
-                    "spot": new_spot_full
-                })
-                itinerary[day_key] = slots
+                itinerary[day_key] = insert_spot_into_day(slots, new_spot_full)
                 break
 
     st.session_state.itinerary = itinerary
@@ -392,45 +298,6 @@ def apply_ai_suggestion(pending):
         )
     st.success(f"✅ Added {new_spot.get('name')} to your itinerary!")
     st.session_state.feedback_given = {}
-
-
-def _add_minutes_to_time(time_str, minutes):
-    try:
-        is_pm = "PM" in time_str
-        is_am = "AM" in time_str
-        clean = time_str.replace(" AM", "").replace(" PM", "")
-        h, m = map(int, clean.split(":"))
-        if is_pm and h != 12:
-            h += 12
-        if is_am and h == 12:
-            h = 0
-        total = min(h * 60 + m + minutes, 20 * 60)
-        return _format_time_from_mins(total)
-    except:
-        return "8:00 PM"
-
-
-def _format_time_from_mins(minutes):
-    hour = minutes // 60
-    minute = minutes % 60
-    am_pm = "AM" if hour < 12 else "PM"
-    dh = hour if hour <= 12 else hour - 12
-    if dh == 0:
-        dh = 12
-    return f"{dh}:{minute:02d} {am_pm}"
-
-
-def _get_label_from_time(time_str):
-    try:
-        is_pm = "PM" in time_str
-        hour = int(time_str.split(":")[0])
-        if is_pm and hour != 12:
-            hour += 12
-        return ("Morning" if hour < 12
-                else "Afternoon" if hour < 17
-                else "Evening")
-    except:
-        return "Morning"
 
 
 def calculate_budget_breakdown(itinerary, hotels, restaurants,
@@ -665,8 +532,6 @@ def show_itinerary():
     if "view_mode" not in st.session_state:
         st.session_state.view_mode = "timeline"
 
-    weather_forecast = st.session_state.get("weather_forecast", [])
-
     col1, col2 = st.columns([4, 1])
     with col1:
         st.title(f"🗺️ Your {days}-Day {city} Itinerary")
@@ -771,17 +636,14 @@ def show_itinerary():
 
 def show_map_from_timed(itinerary, city):
     flat_itinerary = {}
-    time_labels = ["Morning", "Afternoon", "Evening"]
     for day_num, slots in itinerary.items():
         flat_itinerary[str(day_num)] = {}
         if isinstance(slots, list):
-            li = 0
-            for slot in slots:
+            for idx, slot in enumerate(slots):
                 if isinstance(slot, dict):
                     spot = slot.get("spot", {})
-                    if spot and li < 3:
-                        flat_itinerary[str(day_num)][time_labels[li]] = spot
-                        li += 1
+                    if spot:
+                        flat_itinerary[str(day_num)][f"Stop {idx + 1}"] = spot
         elif isinstance(slots, dict):
             flat_itinerary[str(day_num)] = slots
     show_map(flat_itinerary, city)
@@ -813,7 +675,6 @@ def show_timed_timeline(itinerary):
                 end_time = slot.get("end_time", "")
                 duration = slot.get("duration_hours", 2.0)
                 transport_label = slot.get("transport_label")
-                transport_mode = slot.get("transport_mode")
 
                 if i > 0 and transport_label:
                     t1, t2, t3 = st.columns([2, 1, 12])
@@ -903,88 +764,6 @@ def show_timed_timeline(itinerary):
                     )
 
         st.divider()
-
-def _get_hour_from_time(time_str):
-    try:
-        is_pm = "PM" in time_str
-        h = int(time_str.replace(" AM", "").replace(
-            " PM", ""
-        ).split(":")[0])
-        if is_pm and h != 12:
-            h += 12
-        if not is_pm and h == 12:
-            h = 0
-        return h
-    except:
-        return 9
-
-
-def _show_meal_slot(meal_type, last_spot, restaurants,
-                   after_time, currency_symbol="₹"):
-    meal_icons = {
-        "breakfast": "🌅 Breakfast",
-        "lunch": "🍽️ Lunch",
-        "dinner": "🌙 Dinner"
-    }
-    label = meal_icons.get(meal_type, "🍽️ Meal")
-
-    spot_lat = None
-    spot_lon = None
-    if isinstance(last_spot, dict):
-        spot_lat = last_spot.get("latitude")
-        spot_lon = last_spot.get("longitude")
-
-    nearby = _get_nearby_restaurant(
-        restaurants, spot_lat, spot_lon, meal_type
-    )
-
-    t1, t2, t3 = st.columns([2, 1, 12])
-    with t2:
-        st.markdown(
-            "<div style='text-align:center; color:#aaa; "
-            "font-size:14px; line-height:0.8; padding:2px 0'>│</div>",
-            unsafe_allow_html=True
-        )
-    with t3:
-        if nearby:
-            food_type = nearby.get("food_type", "veg")
-            fe = "🥦" if food_type == "veg" else "🍖"
-            price = nearby.get("price_per_meal_local", 0)
-            maps_url = nearby.get(
-                "google_maps_url",
-                f"https://maps.google.com/?q={nearby.get('name', '')}"
-            )
-            st.markdown(
-                f"<div style='background:#FFF8E1; color:#5D4037; "
-                f"padding:6px 12px; border-radius:10px; "
-                f"display:inline-block; margin:4px 0; font-size:12px'>"
-                f"🍽️ <b>{label}</b> — "
-                f"{fe} {nearby.get('name', '')} "
-                f"({nearby.get('cuisine', '')}) | "
-                f"{currency_symbol}{price:.0f}/meal | "
-                f"<a href='{maps_url}' target='_blank' "
-                f"style='color:#1D9E75'>📍 Maps</a>"
-                f"</div>",
-                unsafe_allow_html=True
-            )
-        else:
-            st.markdown(
-                f"<div style='background:#FFF8E1; color:#5D4037; "
-                f"padding:6px 12px; border-radius:10px; "
-                f"display:inline-block; margin:4px 0; font-size:12px'>"
-                f"🍽️ <b>{label}</b> — "
-                f"Find a local restaurant nearby"
-                f"</div>",
-                unsafe_allow_html=True
-            )
-
-    t1, t2, t3 = st.columns([2, 1, 12])
-    with t2:
-        st.markdown(
-            "<div style='text-align:center; color:#aaa; "
-            "font-size:14px; line-height:0.8; padding:2px 0'>│</div>",
-            unsafe_allow_html=True
-        )
 
 
 def render_spot_card(day, slot_index, spot, duration_hours=2.0):
@@ -1215,7 +994,7 @@ def show_restaurants(restaurants, currency_symbol):
                 )
                 nearest_day = rest.get("nearest_day_label", "")
                 if nearest_day:
-                    st.caption(f"📍 {nearest_day}")   
+                    st.caption(f"📍 {nearest_day}")
                 st.markdown(
                     f"<span style='background:{fc}; color:white; "
                     f"padding:2px 8px; border-radius:12px; "

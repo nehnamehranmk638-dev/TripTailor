@@ -9,7 +9,7 @@ client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 AVAILABLE_CITIES = [
     "Mumbai", "Jaipur", "Agra", "Mysore", "Delhi",
-    "Goa", "Kerala", "Chennai", "Dubai", "Singapore", "Bangkok"
+    "Goa", "Kerala", "Chennai"
 ]
 
 def extract_trip_details(user_message: str, user_country: str = "India") -> dict:
@@ -67,7 +67,8 @@ def handle_midtrip_request(
     current_itinerary: dict,
     city: str,
     day: int = None,
-    chat_history: list = None
+    chat_history: list = None,
+    total_days: int = None
 ) -> dict:
     itinerary_summary = []
     for day_num, slots in current_itinerary.items():
@@ -81,11 +82,16 @@ def handle_midtrip_request(
                             f"{spot.get('name', '')} ({spot.get('category', '')})"
                         )
 
+    if total_days is None:
+        total_days = len(current_itinerary) if current_itinerary else 1
+
     messages = []
 
     messages.append({
         "role": "user",
         "content": f"""You are a helpful travel assistant for a trip to {city}.
+
+This trip is {total_days} day(s) long. Valid day numbers are 1 to {total_days}.
 
 Current itinerary:
 {chr(10).join(itinerary_summary)}
@@ -106,23 +112,26 @@ You have memory of the full conversation. Be helpful, friendly and specific."""
 
     messages.append({"role": "user", "content": user_message})
 
-    prompt_suffix = """
+    prompt_suffix = f"""
 
 Based on the conversation and current itinerary, return ONLY a JSON object:
-{
-    "action": "add_spot" or "replace_spot" or "restaurant_suggestion" or "general_advice",
+{{
+    "action": "add_spot" or "remove_spot" or "replace_spot" or "restaurant_suggestion" or "general_advice",
     "day": specific day number as integer if mentioned (e.g. 2 for "Day 2") or null,
     "time_slot": "Morning" or "Afternoon" or "Evening" or null,
+    "spot_name_hint": "a short phrase identifying which existing spot the user means, taken from the itinerary above, or null",
     "reason": "brief reason for change",
     "category_preference": "Culture" or "Food" or "Nature" or "Shopping" or "Art" or "Nightlife" or null,
     "budget_preference": "budget" or "mid-range" or "luxury" or null,
     "response_message": "a short friendly response. If action is add_spot or replace_spot, say you're finding an option now, WITHOUT naming a specific place yet — the backend will pick and confirm the real one.",
     "indoor_preferred": true or false
-}
+}}
 
 Rules:
-- If the user asks to ADD a new spot/activity/place to a specific day — set action to "add_spot". Extract day number from their message. If category is mentioned (culture, food, nature, shopping, art, nightlife) set category_preference, otherwise null.
-- If the user asks to replace, change, swap, remove an EXISTING spot already in the itinerary — set action to "replace_spot".
+- This trip only has {total_days} day(s). If the user mentions a day number greater than {total_days} or less than 1, set action to "general_advice" and set response_message to explain the trip only has {total_days} day(s) and ask which valid day they meant.
+- If the user asks to REMOVE, delete, drop, or cancel a spot WITHOUT wanting a replacement for it — set action to "remove_spot". Set spot_name_hint to the closest matching spot name from the itinerary above based on what the user described.
+- If the user asks to ADD a new spot/activity/place to a specific valid day — set action to "add_spot". Extract day number from their message. If category is mentioned (culture, food, nature, shopping, art, nightlife) set category_preference, otherwise null.
+- If the user asks to replace, change, swap an EXISTING spot for something else — set action to "replace_spot". Set spot_name_hint to the closest matching spot name from the itinerary above.
 - If the user asks for restaurant/food/dining recommendations — set action to "restaurant_suggestion".
 - Otherwise — set action to "general_advice".
 - NEVER ask a clarifying question if a category was already mentioned anywhere in the conversation history — use the most recent category mentioned and proceed with add_spot or replace_spot immediately. Do not loop asking for confirmation.

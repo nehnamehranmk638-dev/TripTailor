@@ -151,6 +151,7 @@ def _distribute_spots_across_days(ranked_spots, days, max_hours_per_day=9):
     day_hours = {d: 0.0 for d in range(1, days + 1)}
     day_categories = {d: defaultdict(int) for d in range(1, days + 1)}
     MAX_PER_CATEGORY_PER_DAY = 2
+    MAX_SPOTS_PER_DAY = 4
 
     remaining = list(ranked_spots)
 
@@ -164,7 +165,7 @@ def _distribute_spots_across_days(ranked_spots, days, max_hours_per_day=9):
         day_hours[d] += dur
         day_categories[d][seed.category] += 1
 
-        while remaining:
+        while remaining and len(day_buckets[d]) < MAX_SPOTS_PER_DAY:
             anchor = day_buckets[d][-1]
             anchor_lat = getattr(anchor, 'latitude', None)
             anchor_lon = getattr(anchor, 'longitude', None)
@@ -207,7 +208,9 @@ def _distribute_spots_across_days(ranked_spots, days, max_hours_per_day=9):
         for _ in range(days):
             d = leftover_day
             leftover_day = (leftover_day % days) + 1
-            if day_hours[d] + dur <= max_hours_per_day:
+            if (day_hours[d] + dur <= max_hours_per_day and
+                    len(day_buckets[d]) < MAX_SPOTS_PER_DAY):
+
                 day_buckets[d].append(spot)
                 day_hours[d] += dur
                 day_categories[d][spot.category] += 1
@@ -261,7 +264,7 @@ def build_timed_itinerary(ranked_spots, days):
                 mode, transport_label = _format_transport(
                     dist_km, travel_mins
                 )
-                
+
             else:
                 dist_km = None
                 travel_mins = 0
@@ -364,14 +367,18 @@ def smart_replan(current_itinerary, all_spots, category_weights,
             duration_hours = slot.get("duration_hours", 2.0)
             duration_mins = int(duration_hours * 60)
 
+            prev_lat = prev_spot_data.get("latitude") if prev_spot_data else None
+            prev_lon = prev_spot_data.get("longitude") if prev_spot_data else None
+            spot_lat = spot_data.get("latitude")
+            spot_lon = spot_data.get("longitude")
+
             if prev_spot_data:
                 dist_km = _haversine_distance_km(
-                    prev_spot_data.get("latitude"),
-                    prev_spot_data.get("longitude"),
-                    spot_data.get("latitude"),
-                    spot_data.get("longitude")
+                    prev_lat, prev_lon, spot_lat, spot_lon
                 )
-                travel_mins = _travel_time_minutes(dist_km)
+                travel_mins = _travel_time_minutes(
+                    dist_km, prev_lat, prev_lon, spot_lat, spot_lon
+                )
                 mode, transport_label = _format_transport(
                     dist_km, travel_mins
                 )
@@ -403,17 +410,14 @@ def smart_replan(current_itinerary, all_spots, category_weights,
                 if replacement:
                     r_dur = float(replacement.duration_hours or 2.0)
                     r_dur_mins = int(r_dur * 60)
+                    r_lat = float(replacement.latitude) if replacement.latitude else None
+                    r_lon = float(replacement.longitude) if replacement.longitude else None
                     r_dist = _haversine_distance_km(
-                        prev_spot_data.get("latitude")
-                        if prev_spot_data else None,
-                        prev_spot_data.get("longitude")
-                        if prev_spot_data else None,
-                        float(replacement.latitude)
-                        if replacement.latitude else None,
-                        float(replacement.longitude)
-                        if replacement.longitude else None
+                        prev_lat, prev_lon, r_lat, r_lon
                     )
-                    r_travel = _travel_time_minutes(r_dist)
+                    r_travel = _travel_time_minutes(
+                        r_dist, prev_lat, prev_lon, r_lat, r_lon
+                    )
                     r_mode, r_label = _format_transport(r_dist, r_travel)
                     r_arrival = _round_to_quarter_hour(current_time + r_travel)
                     r_spot_dict = _spot_to_dict(replacement)
@@ -440,6 +444,130 @@ def smart_replan(current_itinerary, all_spots, category_weights,
         new_itinerary[day_num] = new_day
 
     return new_itinerary
+
+
+def insert_spot_into_day(day_slots, new_spot_dict, day_start=9 * 60, day_end=20 * 60):
+    """
+    Inserts new_spot_dict (a plain dict with id/name/category/duration_hours/
+    latitude/longitude/cost_usd/cost_local/etc) into the geographically best
+    position within day_slots (a list of existing slot dicts), recalculating
+    real travel times/labels for the inserted spot and the slot immediately
+    after it. Returns the new day_slots list with the spot inserted.
+    """
+    if not day_slots:
+        dur = float(new_spot_dict.get("duration_hours", 2.0))
+        dur_mins = int(dur * 60)
+        start = day_start
+        end = min(start + dur_mins, day_end)
+        return [{
+            "spot": new_spot_dict,
+            "start_time": _format_time(start),
+            "end_time": _format_time(end),
+            "duration_hours": dur,
+            "time_label": _get_time_label(start),
+            "travel_mins": 0,
+            "dist_km": None,
+            "transport_mode": None,
+            "transport_label": None
+        }]
+
+    new_lat = new_spot_dict.get("latitude")
+    new_lon = new_spot_dict.get("longitude")
+
+    best_insert_idx = len(day_slots)
+    best_dist = float('inf')
+
+    for i, slot in enumerate(day_slots):
+        existing_spot = slot.get("spot", {})
+        e_lat = existing_spot.get("latitude")
+        e_lon = existing_spot.get("longitude")
+        dist = _haversine_distance_km(new_lat, new_lon, e_lat, e_lon)
+        if dist is None:
+            dist = 999
+        if dist < best_dist:
+            best_dist = dist
+            best_insert_idx = i + 1
+
+    new_day = list(day_slots)
+
+    prev_slot = new_day[best_insert_idx - 1] if best_insert_idx > 0 else None
+    prev_spot = prev_slot.get("spot", {}) if prev_slot else None
+    prev_lat = prev_spot.get("latitude") if prev_spot else None
+    prev_lon = prev_spot.get("longitude") if prev_spot else None
+
+    if prev_slot:
+        prev_end_str = prev_slot.get("end_time", "9:00 AM")
+        prev_end_mins = _time_str_to_minutes(prev_end_str)
+    else:
+        prev_end_mins = day_start
+
+    dist_km = _haversine_distance_km(prev_lat, prev_lon, new_lat, new_lon)
+    travel_mins = _travel_time_minutes(dist_km, prev_lat, prev_lon, new_lat, new_lon)
+    mode, transport_label = _format_transport(dist_km, travel_mins)
+
+    arrival = _round_to_quarter_hour(prev_end_mins + travel_mins)
+    dur = float(new_spot_dict.get("duration_hours", 2.0))
+    dur_mins = int(dur * 60)
+
+    if arrival + dur_mins > day_end:
+        dur_mins = max(day_end - arrival, 30)
+        dur = round(dur_mins / 60, 1)
+
+    end = arrival + dur_mins
+
+    new_slot = {
+        "spot": new_spot_dict,
+        "start_time": _format_time(arrival),
+        "end_time": _format_time(end),
+        "duration_hours": dur,
+        "time_label": _get_time_label(arrival),
+        "travel_mins": travel_mins,
+        "dist_km": round(dist_km, 2) if dist_km else None,
+        "transport_mode": mode,
+        "transport_label": transport_label
+    }
+
+    new_day.insert(best_insert_idx, new_slot)
+
+    if best_insert_idx + 1 < len(new_day):
+        next_slot = new_day[best_insert_idx + 1]
+        next_spot = next_slot.get("spot", {})
+        n_lat = next_spot.get("latitude")
+        n_lon = next_spot.get("longitude")
+
+        n_dist = _haversine_distance_km(new_lat, new_lon, n_lat, n_lon)
+        n_travel = _travel_time_minutes(n_dist, new_lat, new_lon, n_lat, n_lon)
+        n_mode, n_label = _format_transport(n_dist, n_travel)
+
+        n_arrival = _round_to_quarter_hour(end + n_travel)
+        n_dur_mins = int(float(next_slot.get("duration_hours", 2.0)) * 60)
+        n_end = n_arrival + n_dur_mins
+
+        new_day[best_insert_idx + 1] = {
+            **next_slot,
+            "start_time": _format_time(n_arrival),
+            "end_time": _format_time(n_end),
+            "travel_mins": n_travel,
+            "dist_km": round(n_dist, 2) if n_dist else None,
+            "transport_mode": n_mode,
+            "transport_label": n_label
+        }
+
+    return new_day
+
+
+def _time_str_to_minutes(time_str):
+    try:
+        is_pm = "PM" in time_str
+        clean = time_str.replace(" AM", "").replace(" PM", "")
+        h, m = map(int, clean.split(":"))
+        if is_pm and h != 12:
+            h += 12
+        if not is_pm and h == 12:
+            h = 0
+        return h * 60 + m
+    except:
+        return 9 * 60
 
 
 def _format_time(minutes):

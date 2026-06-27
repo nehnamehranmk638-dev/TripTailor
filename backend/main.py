@@ -499,17 +499,31 @@ def midtrip_assist(request: MidTripRequest):
         usd_rate = currency_info["usd_rate"]
         currency_symbol = currency_info["currency_symbol"]
 
+        total_days = len(request.current_itinerary) if request.current_itinerary else 1
+
         ai_response = handle_midtrip_request(
             request.message,
             request.current_itinerary,
             request.city,
             request.day,
-            request.chat_history
+            request.chat_history,
+            total_days
         )
 
         suggestions = []
         restaurant_suggestions = []
         added_spot = None
+
+        requested_day = ai_response.get("day")
+        if requested_day is not None and (
+            int(requested_day) < 1 or int(requested_day) > total_days
+        ):
+            ai_response["action"] = "general_advice"
+            ai_response["response_message"] = (
+                f"This trip only has {total_days} day(s). "
+                f"Which day from 1 to {total_days} did you mean?"
+            )
+            ai_response["day"] = None
 
         if ai_response.get("action") == "add_spot":
             target_day = str(ai_response.get("day")) if ai_response.get("day") else None
@@ -572,6 +586,47 @@ def midtrip_assist(request: MidTripRequest):
                         f"I couldn't find a new spot for Day {target_day} in that category — try a different category?"
                     )
 
+        removed_spot_name = None
+
+        if ai_response.get("action") == "remove_spot":
+            target_day = str(ai_response.get("day")) if ai_response.get("day") else None
+            name_hint = (ai_response.get("spot_name_hint") or "").lower()
+
+            if not target_day or not name_hint:
+                ai_response["response_message"] = (
+                    "Which spot would you like me to remove, and from which day?"
+                )
+            elif target_day not in request.current_itinerary:
+                ai_response["response_message"] = (
+                    f"Couldn't find Day {target_day} in your itinerary."
+                )
+            else:
+                day_slots = request.current_itinerary[target_day]
+                matches = []
+                if isinstance(day_slots, list):
+                    for slot in day_slots:
+                        if isinstance(slot, dict):
+                            spot = slot.get("spot", {})
+                            spot_name = (spot.get("name") or "").lower()
+                            if name_hint in spot_name or spot_name in name_hint:
+                                matches.append(spot.get("name"))
+
+                if len(matches) == 1:
+                    removed_spot_name = matches[0]
+                    ai_response["response_message"] = (
+                        f"Removed {removed_spot_name} from Day {target_day} ✅"
+                    )
+                elif len(matches) == 0:
+                    ai_response["response_message"] = (
+                        f"Couldn't find a spot matching '{name_hint}' on Day {target_day}."
+                    )
+                else:
+                    ai_response["response_message"] = (
+                        f"Found multiple matches: {', '.join(matches)}. "
+                        f"Which one did you mean?"
+                    )
+
+
         elif ai_response.get("action") == "replace_spot":
             category_weights = dict(user.category_weights)
             spots = db.execute(
@@ -621,6 +676,8 @@ def midtrip_assist(request: MidTripRequest):
                     "latitude": float(s.latitude) if s.latitude else None,
                     "longitude": float(s.longitude) if s.longitude else None
                 })
+        
+
 
         elif ai_response.get("action") == "restaurant_suggestion":
             budget_pref = ai_response.get("budget_preference")
@@ -640,13 +697,23 @@ def midtrip_assist(request: MidTripRequest):
             for r in restaurants:
                 cost_local = convert_to_local(float(r.price_per_meal_usd), usd_rate)
                 restaurant_suggestions.append({
+                    "id": r.id,
                     "name": r.name,
                     "cuisine": r.cuisine,
+                    "food_type": r.food_type,
+                    "neighborhood": r.neighborhood or request.city,
+                    "price_per_meal_usd": float(r.price_per_meal_usd),
                     "cost_usd": float(r.price_per_meal_usd),
+                    "price_per_meal_local": cost_local,
                     "cost_local": cost_local,
                     "currency_symbol": currency_symbol,
                     "rating": float(r.rating),
-                    "description": r.description
+                    "description": r.description,
+                    "best_meal": r.best_meal or "Chef's special",
+                    "best_time": r.best_time or "Open daily",
+                    "crowd_level": r.crowd_level or "Moderate",
+                    "google_maps_url": r.google_maps_url or
+                        f"https://maps.google.com/?q={r.name}+{request.city}"
                 })
 
         return {
@@ -654,6 +721,7 @@ def midtrip_assist(request: MidTripRequest):
             "suggestions": suggestions,
             "restaurant_suggestions": restaurant_suggestions,
             "added_spot": added_spot,
+            "removed_spot_name": removed_spot_name,
             "target_day": ai_response.get("day"),
             "target_time_slot": ai_response.get("time_slot")
         }
