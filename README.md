@@ -8,8 +8,6 @@
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-336791?style=for-the-badge&logo=postgresql)
 ![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-red?style=for-the-badge)
 ![Groq](https://img.shields.io/badge/Groq-LLM-orange?style=for-the-badge)
-![OSRM](https://img.shields.io/badge/OSRM-Routing-success?style=for-the-badge)
-![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)
 
 </p>
 
@@ -29,9 +27,7 @@ An <b>AI-powered Travel Itinerary Planner</b> that generates intelligent, geogra
 - [Installation](#-installation)
 - [Usage](#-usage)
 - [Future Improvements](#-future-improvements)
-- [Contributing](#-contributing)
 - [Contact](#-contact)
-- [License](#-license)
 
 ---
 
@@ -159,9 +155,6 @@ Users can:
 - Groq API
 - Llama 3.3 70B
 
-## Routing
-
-- OSRM
 
 ---
 
@@ -330,56 +323,18 @@ TripTailor automatically generates:
 
 ---
 
-# 🤝 Contributing
-
-Contributions are welcome!
-
-1. Fork the repository
-
-2. Create a feature branch
-
-```bash
-git checkout -b feature/NewFeature
-```
-
-3. Commit your changes
-
-```bash
-git commit -m "Added New Feature"
-```
-
-4. Push to GitHub
-
-```bash
-git push origin feature/NewFeature
-```
-
-5. Open a Pull Request
-
----
 
 # 👩‍💻 Contact
 
-**Your Name**
 
-GitHub: https://github.com/YOUR_USERNAME
+GitHub: https://github.com/nehnamehranmk638-dev
 
-Email: your_email@example.com
+Email: nehnamehranmk17@gmail.com
 
 Project Repository:
+https://github.com/nehnamehranmk638-dev/TripTailor
 
-https://github.com/YOUR_USERNAME/TripTailor
-
----
-
-# 📄 License
-
-This project is licensed under the **MIT License**.
-
-See the `LICENSE` file for more information.
 
 ---
 
-<p align="center">
-Made with ❤️ using Python, FastAPI, Streamlit, PostgreSQL, Groq AI & OSRM
-</p>
+
